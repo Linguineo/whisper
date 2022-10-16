@@ -107,6 +107,7 @@ class DecodingResult:
     language_probs: Optional[Dict[str, float]] = None
     tokens: List[int] = field(default_factory=list)
     text: str = ""
+    alternatives: List[str] = field(default_factory=list)
     avg_logprob: float = np.nan
     no_speech_prob: float = np.nan
     temperature: float = np.nan
@@ -647,6 +648,11 @@ class DecodingTask:
         ]
 
         # select the top-ranked sample in each group
+        allAlternatives: List[List[string]] = [];
+        for groupTokens in tokens:
+            alternatives: List[str] = [tokenizer.decode(t).strip() for t in groupTokens]
+            allAlternatives.append(alternatives);
+
         selected = self.sequence_ranker.rank(tokens, sum_logprobs)
         tokens: List[List[int]] = [t[i].tolist() for i, t in zip(selected, tokens)]
         texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
@@ -654,7 +660,7 @@ class DecodingTask:
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
         avg_logprobs: List[float] = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
 
-        fields = (texts, languages, tokens, audio_features, avg_logprobs, no_speech_probs)
+        fields = (texts, allAlternatives, languages, tokens, audio_features, avg_logprobs, no_speech_probs)
         if len(set(map(len, fields))) != 1:
             raise RuntimeError(f"inconsistent result lengths: {list(map(len, fields))}")
 
@@ -664,12 +670,13 @@ class DecodingTask:
                 language=language,
                 tokens=tokens,
                 text=text,
+                alternatives=alternatives,
                 avg_logprob=avg_logprob,
                 no_speech_prob=no_speech_prob,
                 temperature=self.options.temperature,
                 compression_ratio=compression_ratio(text),
             )
-            for text, language, tokens, features, avg_logprob, no_speech_prob in zip(*fields)
+            for text, alternatives, language, tokens, features, avg_logprob, no_speech_prob in zip(*fields)
         ]
 
 
@@ -699,7 +706,7 @@ def decode(model: "Whisper", mel: Tensor, options: DecodingOptions = DecodingOpt
         mel = mel.unsqueeze(0)
 
     result = DecodingTask(model, options).run(mel)
-    
+
     if single:
         result = result[0]
 
